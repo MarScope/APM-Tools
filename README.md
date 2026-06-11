@@ -5,6 +5,7 @@ A collection of utilities and iRules for F5 BIG-IP Access Policy Manager (APM). 
 ## Contents
 
 - [`CSP-fix/apm_csp_rewrite_v3.tcl`](CSP-fix/apm_csp_rewrite_v3.tcl) — iRule that injects a strict, nonce-based Content Security Policy and a full set of modern security headers on every APM-generated HTML response (logon, logout, message box, webtop, error, EULA, change-password, etc.).
+- [`AccessTelemetry/`](AccessTelemetry/) — two-layer client telemetry & anomaly-detection framework: a proc-library iRule plus an execution iRule that collect client IP/XFF, IP reputation, GEO, JA4/JA4T/JA4L fingerprints, AWAF/Bot-Defense/XC device IDs, and user identity, and distribute them via HSL, APM session variables, WAF violation decoration, downstream headers, and a local table buffer for a future iApps LX dashboard. See [`AccessTelemetry/README.md`](AccessTelemetry/README.md).
 
 ---
 

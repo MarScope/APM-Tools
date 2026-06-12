@@ -507,8 +507,12 @@ when BOTDEFENSE_ACTION priority 900 {
         set rsn ""
         catch { set act [BOTDEFENSE::action] }
         catch { set rsn [BOTDEFENSE::reason] }
+        set hint ""
+        if { ![info exists atel(device_bot)] && $act eq "allow" } {
+            set hint " -- challenge passed but no device id: set 'Device ID Mode' to Generate Before/After Access in the Bot Defense profile"
+        }
         call atel_telemetry_lib::dbg "device_bot" \
-            "device_id=[expr {[info exists atel(device_bot)] ? $atel(device_bot) : ""}] action=$act reason=$rsn"
+            "device_id=[expr {[info exists atel(device_bot)] ? $atel(device_bot) : ""}] action=$act reason=$rsn$hint"
     }
     if { $newid && [info exists atel_emitted] && !$static::atel_emit_per_request } {
         set pairs [list ts [clock seconds] event "device_id"]

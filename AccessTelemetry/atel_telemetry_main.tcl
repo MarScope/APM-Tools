@@ -494,25 +494,35 @@ when BOTDEFENSE_ACTION priority 900 {
     # browser has run the challenge and re-sent.  This event also fires after
     # our HTTP_REQUEST record, so a newly seen id triggers a one-time
     # supplemental "device_id" record in per-flow emission mode.
+    set did ""
+    set did_err ""
+    if { [catch { set did [BOTDEFENSE::device_id] } did_err] } {
+        set did ""
+    } else {
+        set did_err ""
+    }
     set newid 0
-    catch {
-        set did [BOTDEFENSE::device_id]
-        if { $did ne "" && $did ne "0" && ![info exists atel(device_bot)] } {
-            set atel(device_bot) $did
-            set newid 1
-        }
+    if { $did ne "" && $did ne "0" && ![info exists atel(device_bot)] } {
+        set atel(device_bot) $did
+        set newid 1
     }
     if { $static::atel_en(device_bot) >= 2 || $static::atel_debug } {
+        # Forensic line: raw return value vs. error vs. missing TSPD cookie are
+        # three different failure modes -- see the README triage table.
         set act ""
         set rsn ""
         catch { set act [BOTDEFENSE::action] }
         catch { set rsn [BOTDEFENSE::reason] }
-        set hint ""
-        if { ![info exists atel(device_bot)] && $act eq "allow" } {
-            set hint " -- challenge passed but no device id: set 'Device ID Mode' to Generate Before/After Access in the Bot Defense profile"
+        set tspd ""
+        catch {
+            foreach cn [HTTP::cookie names] {
+                if { [string match "TSPD*" $cn] } { lappend tspd $cn }
+            }
         }
+        set extra ""
+        if { $did_err ne "" } { set extra " err=\"$did_err\"" }
         call atel_telemetry_lib::dbg "device_bot" \
-            "device_id=[expr {[info exists atel(device_bot)] ? $atel(device_bot) : ""}] action=$act reason=$rsn$hint"
+            "device_id_raw=\"$did\" action=$act reason=\"$rsn\" tspd_cookies=\"[join $tspd ","]\"$extra"
     }
     if { $newid && [info exists atel_emitted] && !$static::atel_emit_per_request } {
         set pairs [list ts [clock seconds] event "device_id"]

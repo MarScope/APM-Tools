@@ -43,6 +43,7 @@ when RULE_INIT {
     set static::atel_en(ja4)         1      ;# JA4 TLS ClientHello fingerprint
     set static::atel_en(ja4t)        1      ;# JA4T TCP SYN fingerprint
     set static::atel_en(ja4l)        1      ;# JA4L light distance (tcp latency _ ttl _ tls latency)
+    set static::atel_en(ja4h)        1      ;# JA4H HTTP request fingerprint
     set static::atel_en(identity)    1      ;# user identity (APM / Authorization / Cookie)
     set static::atel_en(device_awaf) 1      ;# AWAF (ASM) DeviceID via ASM::fingerprint
     set static::atel_en(device_bot)  1      ;# Bot Defense profile DeviceID (BOTDEFENSE::device_id)
@@ -261,6 +262,18 @@ when HTTP_REQUEST priority 900 {
         set atel(ja4) $ja4_fingerprint
     }
 
+    # --- JA4H HTTP fingerprint ---
+    if { $static::atel_en(ja4h)
+         && (![info exists atel(ja4h)] || $static::atel_emit_per_request) } {
+        set jh [call atel_telemetry_lib::ja4h_collect \
+                [expr {$static::atel_en(ja4h) >= 2 || $static::atel_debug}]]
+        set atel(ja4h) [lindex $jh 0]
+        if { [lindex $jh 1] ne "" } {
+            set atel(ja4h_r) [lindex $jh 1]
+            call atel_telemetry_lib::dbg "ja4h" "JA4H=$atel(ja4h) raw=$atel(ja4h_r)"
+        }
+    }
+
     # --- XC bot DeviceID (header inserted by F5 Distributed Cloud) ---
     if { $static::atel_en(device_xc) } {
         set xcid [HTTP::header value $static::atel_xc_header]
@@ -418,18 +431,36 @@ when ACCESS_POLICY_COMPLETED priority 900 {
 ###############################################################################################
 
 when ASM_REQUEST_DONE priority 900 {
-    if { !$static::atel_enabled || !$static::atel_waf_decorate } { return }
+    if { !$static::atel_enabled } { return }
+
+    # AWAF DeviceID: collect on every inspected request, independent of the
+    # violation-decoration gating below.  This event fires after our
+    # HTTP_REQUEST record is emitted, so when a device id first appears on a
+    # per-flow emission we send a one-time supplemental "device_id" record.
+    if { $static::atel_en(device_awaf) && ![info exists atel(device_awaf)] } {
+        set fp ""
+        catch { set fp [ASM::fingerprint] }
+        if { $fp ne "" && $fp ne "0" } {
+            set atel(device_awaf) $fp
+            if { $static::atel_en(device_awaf) >= 2 || $static::atel_debug } {
+                call atel_telemetry_lib::dbg "device_awaf" "fingerprint=$fp"
+            }
+            if { [info exists atel_emitted] && !$static::atel_emit_per_request } {
+                set pairs [list ts [clock seconds] event "device_id"]
+                if { [info exists atel(_vs)] } { lappend pairs vs $atel(_vs) }
+                foreach k [lsort [array names atel]] {
+                    if { [string index $k 0] ne "_" } { lappend pairs $k $atel($k) }
+                }
+                call atel_telemetry_lib::emit $pairs
+            }
+        }
+    }
+
+    if { !$static::atel_waf_decorate } { return }
 
     set st ""
     catch { set st [ASM::status] }
     if { $st eq "passed" && !$static::atel_waf_decorate_all } { return }
-
-    if { $static::atel_en(device_awaf) } {
-        catch {
-            set fp [ASM::fingerprint]
-            if { $fp ne "" } { set atel(device_awaf) $fp }
-        }
-    }
 
     set pairs [list ts [clock seconds] event "waf"]
     if { [info exists atel(_vs)] } { lappend pairs vs $atel(_vs) }
@@ -452,9 +483,18 @@ when ASM_REQUEST_DONE priority 900 {
 when BOTDEFENSE_ACTION priority 900 {
     if { !$static::atel_enabled || !$static::atel_en(device_bot) } { return }
 
+    # Device IDs come from the Bot Defense JS challenge, so the first request
+    # of a brand-new client legitimately has none; the id shows up once the
+    # browser has run the challenge and re-sent.  This event also fires after
+    # our HTTP_REQUEST record, so a newly seen id triggers a one-time
+    # supplemental "device_id" record in per-flow emission mode.
+    set newid 0
     catch {
         set did [BOTDEFENSE::device_id]
-        if { $did ne "" && $did ne "0" } { set atel(device_bot) $did }
+        if { $did ne "" && $did ne "0" && ![info exists atel(device_bot)] } {
+            set atel(device_bot) $did
+            set newid 1
+        }
     }
     if { $static::atel_en(device_bot) >= 2 || $static::atel_debug } {
         set act ""
@@ -463,5 +503,13 @@ when BOTDEFENSE_ACTION priority 900 {
         catch { set rsn [BOTDEFENSE::reason] }
         call atel_telemetry_lib::dbg "device_bot" \
             "device_id=[expr {[info exists atel(device_bot)] ? $atel(device_bot) : ""}] action=$act reason=$rsn"
+    }
+    if { $newid && [info exists atel_emitted] && !$static::atel_emit_per_request } {
+        set pairs [list ts [clock seconds] event "device_id"]
+        if { [info exists atel(_vs)] } { lappend pairs vs $atel(_vs) }
+        foreach k [lsort [array names atel]] {
+            if { [string index $k 0] ne "_" } { lappend pairs $k $atel($k) }
+        }
+        call atel_telemetry_lib::emit $pairs
     }
 }

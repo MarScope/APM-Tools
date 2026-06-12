@@ -438,11 +438,12 @@ when ASM_REQUEST_DONE priority 900 {
     # HTTP_REQUEST record is emitted, so when a device id first appears on a
     # per-flow emission we send a one-time supplemental "device_id" record.
     if { $static::atel_en(device_awaf) && ![info exists atel(device_awaf)] } {
+        set awaf_dbg [expr {$static::atel_en(device_awaf) >= 2 || $static::atel_debug}]
         set fp ""
         catch { set fp [ASM::fingerprint] }
         if { $fp ne "" && $fp ne "0" } {
             set atel(device_awaf) $fp
-            if { $static::atel_en(device_awaf) >= 2 || $static::atel_debug } {
+            if { $awaf_dbg } {
                 call atel_telemetry_lib::dbg "device_awaf" "fingerprint=$fp"
             }
             if { [info exists atel_emitted] && !$static::atel_emit_per_request } {
@@ -453,6 +454,11 @@ when ASM_REQUEST_DONE priority 900 {
                 }
                 call atel_telemetry_lib::emit $pairs
             }
+        } elseif { $awaf_dbg } {
+            set st ""
+            catch { set st [ASM::status] }
+            call atel_telemetry_lib::dbg "device_awaf" \
+                "ASM_REQUEST_DONE fired (status=$st) but no fingerprint -- enable Session Tracking 'Use Device ID' in the ASM policy"
         }
     }
 

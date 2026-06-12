@@ -54,7 +54,7 @@ proc effective_ip { conn_ip xff trust } {
         if { [regexp {^([0-9]{1,3}(\.[0-9]{1,3}){3}):[0-9]+$} $first junk bare] } {
             set first $bare
         }
-        if { [call valid_ip $first] } {
+        if { [call atel_telemetry_lib::valid_ip $first] } {
             return [list $first "xff"]
         }
     }
@@ -156,7 +156,7 @@ proc ja4t_collect {} {
 
         set ja4t "${recv_win}_${ops_list}_${mss}_${win_scale}"
     } err] } {
-        call dbg "ja4t" "collect failed: $err"
+        call atel_telemetry_lib::dbg "ja4t" "collect failed: $err"
         set ja4t ""
     }
     return $ja4t
@@ -453,7 +453,7 @@ proc identity_bearer { authval claim } {
     set tok   [string trim [string range $authval 7 end]]
     set parts [split $tok "."]
     if { [llength $parts] < 2 } { return "" }
-    set payload [call b64url_decode [lindex $parts 1]]
+    set payload [call atel_telemetry_lib::b64url_decode [lindex $parts 1]]
     if { $payload eq "" } { return "" }
     set val ""
     regexp -- "\"$claim\"\\s*:\\s*\"(\[^\"\]*)\"" $payload junk val
@@ -473,7 +473,7 @@ proc fmt_record { pairs fmt } {
     set items [list]
     if { $fmt eq "json" } {
         foreach {k v} $pairs {
-            lappend items "\"[call json_escape $k]\":\"[call json_escape $v]\""
+            lappend items "\"[call atel_telemetry_lib::json_escape $k]\":\"[call atel_telemetry_lib::json_escape $v]\""
         }
         return "\{[join $items ","]\}"
     }
@@ -496,7 +496,7 @@ proc table_store { record subtable ttl max } {
             table delete -subtable $subtable [format "%012d" [expr {$seq - $max}]]
         }
     } err] } {
-        call dbg "table" "store failed: $err"
+        call atel_telemetry_lib::dbg "table" "store failed: $err"
     }
 }
 
@@ -504,19 +504,19 @@ proc table_store { record subtable ttl max } {
 # (optionally) /var/log/ltm based on the static:: switches set by the main
 # iRule.  Safe to call from any client-side event.  Returns the record string.
 proc emit { pairs } {
-    set rec [call fmt_record $pairs $static::atel_record_format]
+    set rec [call atel_telemetry_lib::fmt_record $pairs $static::atel_record_format]
 
     if { $static::atel_emit_hsl && $static::atel_hsl_pool ne "" } {
         if { [catch {
             set h [HSL::open -proto $static::atel_hsl_proto -pool $static::atel_hsl_pool]
             HSL::send $h "$rec\n"
         } err] } {
-            call dbg "hsl" "send failed: $err"
+            call atel_telemetry_lib::dbg "hsl" "send failed: $err"
         }
     }
 
     if { $static::atel_emit_table } {
-        call table_store $rec $static::atel_table_name $static::atel_table_ttl $static::atel_table_max
+        call atel_telemetry_lib::table_store $rec $static::atel_table_name $static::atel_table_ttl $static::atel_table_max
     }
 
     if { $static::atel_log_local } {

@@ -132,11 +132,20 @@ Device IDs are JavaScript-derived, so they need both configuration and a round t
   request records. Downstream `X-ATel-*` headers carry device IDs from the next
   keep-alive request onward.
 
-To verify quickly: set the item to debug (`atel_en(device_bot) 2` /
-`atel_en(device_awaf) 2`), browse the site for a few requests, and watch
-`/var/log/ltm` for the `ATEL(device_bot)` / `ATEL(device_awaf)` lines — they log on
-every `BOTDEFENSE_ACTION`/`ASM_REQUEST_DONE`, including the action/reason when no ID is
-present yet.
+### Triage checklist (debug mode)
+
+Set the item to debug (`atel_en(device_awaf) 2` / `atel_en(device_bot) 2`), browse a
+few pages, and watch `/var/log/ltm` (`tail -f /var/log/ltm | grep ATEL`). Debug lines
+are logged at *info* severity so default syslog filtering never hides them. Then:
+
+| Symptom | Cause / fix |
+|---|---|
+| **No `ATEL(device_awaf)` lines at all** | `ASM_REQUEST_DONE` is not firing. The #1 cause: the security policy property **"Trigger ASM iRule Events" is Disabled by default**. Enable it (Security › Application Security › Policies › *policy* › Policy Properties, Advanced view → Trigger ASM iRule Events: **Enabled / Normal Mode**) and **Apply Policy**. Also confirm the ASM policy is attached to this virtual. This setting gates `device_awaf` *and* all WAF decoration records. |
+| `ATEL(device_awaf): ... no fingerprint` lines | Events fire but the policy isn't fingerprinting clients — enable *Session Tracking → Use Device ID* in the policy and Apply. |
+| **No `ATEL(device_bot)` lines at all** | `BOTDEFENSE_ACTION` is not firing — no Bot Defense profile is attached to the virtual (Virtual Server › Security › Policies). |
+| `ATEL(device_bot): device_id_raw=""` with `err="..."` | `BOTDEFENSE::device_id` itself raised an error — the message names the cause (typically wrong event context or an unsupported TMOS version). |
+| `device_id_raw="0"` or `=""` (no err) with empty `tspd_cookies` | The request carries no TSPD device-ID cookie. If Device ID Mode is *None* (the profile default) the ID is never minted — set it to *Generate Before/After Access*. If the mode is already set, the client hasn't run the device-ID JavaScript yet: the first request from a new browser never has an ID, and single-request clients (scanners, curl, monitors) never will. Test with a real browser making multiple requests. |
+| `device_id_raw="0"` or `=""` (no err) but `tspd_cookies` lists a `TSPD*` cookie | The cookie is arriving but Bot Defense isn't honoring it — usually a stale/invalid cookie (clear browser cookies and retry), the profile grace period still being active, or a Single Page Application / cross-domain mismatch in the profile's Browsers settings. |
 
 ## Quick start
 

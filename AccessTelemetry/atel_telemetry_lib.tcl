@@ -31,8 +31,10 @@ when RULE_INIT {
 
 # Gated debug logger.  Items log here only when their per-item mode is debug (2)
 # or the global debug switch is on -- the caller decides; this just prints.
+# Logged at info level on purpose: default syslog filters can drop .debug
+# severity, and these lines only exist when debug mode is explicitly enabled.
 proc dbg { item msg } {
-    log local0.debug "ATEL($item): $msg"
+    log local0. "ATEL($item): $msg"
 }
 
 # Loose IPv4/IPv6 validation -- enough to reject header garbage before we feed

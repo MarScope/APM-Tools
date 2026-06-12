@@ -420,6 +420,75 @@ proc ja4_parse { payload plen } {
 }
 
 ###############################################################################################
+# ---- JA4H : HTTP request fingerprint --------------------------------------------------------
+#  Implemented per the FoxIO JA4H spec (https://github.com/FoxIO-LLC/ja4).
+#  Call from HTTP_REQUEST only.
+###############################################################################################
+
+# Returns { <ja4h> <ja4h_r> }; ja4h_r is "" unless debug is true.
+proc ja4h_collect { debug } {
+    # a: method(2) + version(2) + cookie c/n + referer r/n + hdr count(2) + accept-language(4)
+    set m [string range [string tolower [HTTP::method]] 0 1]
+    if { [string length $m] < 2 } { append m "0" }
+
+    set ver [string map {"." ""} [HTTP::version]]
+    if { [string length $ver] == 1 } { append ver "0" }
+    set ver [string range $ver 0 1]
+
+    set hdr_names   [list]
+    set has_cookie  "n"
+    set has_referer "n"
+    foreach h [HTTP::header names] {
+        set hl [string tolower $h]
+        if { $hl eq "cookie" }  { set has_cookie "c";  continue }
+        if { $hl eq "referer" } { set has_referer "r"; continue }
+        lappend hdr_names $hl
+    }
+    set hc [llength $hdr_names]
+    if { $hc > 99 } { set hc 99 }
+
+    set lang "0000"
+    set alv [HTTP::header value "Accept-Language"]
+    if { $alv ne "" } {
+        set alv [string tolower [lindex [split $alv ",;"] 0]]
+        set alv [string map {"-" "" "_" "" " " ""} $alv]
+        set lang [string range "${alv}0000" 0 3]
+    }
+
+    set ja4h_a "${m}${ver}${has_cookie}${has_referer}[format "%02d" $hc]${lang}"
+
+    # b: header names in received order (cookie/referer excluded)
+    set hdr_str [join $hdr_names ","]
+    set ja4h_b "000000000000"
+    if { $hdr_str ne "" } { set ja4h_b [call atel_telemetry_lib::hash12 $hdr_str] }
+
+    # c/d: sorted cookie names / sorted cookie name=value
+    set ck_names [list]
+    set ck_kv    [list]
+    if { $has_cookie eq "c" } {
+        catch {
+            foreach cn [HTTP::cookie names] {
+                lappend ck_names $cn
+                lappend ck_kv "${cn}=[HTTP::cookie value $cn]"
+            }
+        }
+    }
+    set c_str [join [lsort $ck_names] ","]
+    set d_str [join [lsort $ck_kv] ","]
+    set ja4h_c "000000000000"
+    set ja4h_d "000000000000"
+    if { $c_str ne "" } { set ja4h_c [call atel_telemetry_lib::hash12 $c_str] }
+    if { $d_str ne "" } { set ja4h_d [call atel_telemetry_lib::hash12 $d_str] }
+
+    set ja4h "${ja4h_a}_${ja4h_b}_${ja4h_c}_${ja4h_d}"
+    set ja4h_r ""
+    if { $debug } {
+        set ja4h_r "${ja4h_a}_${hdr_str}_${c_str}"
+    }
+    return [list $ja4h $ja4h_r]
+}
+
+###############################################################################################
 # ---- user identity extraction ---------------------------------------------------------------
 ###############################################################################################
 

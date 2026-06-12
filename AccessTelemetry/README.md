@@ -30,6 +30,7 @@ Each item is independently switchable with three states — `0` off, `1` standar
 | `ja4` | TLS ClientHello parse (or external f5-ja4 iRule) | JA4 fingerprint | `ja4_r` raw fingerprint + log |
 | `ja4t` | TCP SYN options via `DATAGRAM::tcp` in `FLOW_INIT` | JA4T fingerprint | — |
 | `ja4l` | `clock clicks` deltas across TCP + TLS handshakes | JA4L `tcpLatency_ttl_tlsLatency` (client & server light distance) | log line |
+| `ja4h` | HTTP request headers/cookies per the FoxIO JA4H spec | JA4H fingerprint | `ja4h_r` raw (header + cookie-name lists) + log |
 | `identity` | APM session → `Authorization` header (Basic user / Bearer JWT claim) → cookie | identity + source | raw cookie value (standard mode stores a sha256-12 pseudonym) |
 | `device_awaf` | `ASM::fingerprint` (AWAF DeviceID) | device ID on inspected requests | — |
 | `device_bot` | `BOTDEFENSE::device_id` | device ID | action + reason log |
@@ -96,6 +97,11 @@ pipeline works standalone.
   reads that rule's `$ja4_fingerprint` connection variable and never touches
   `TCP::collect`, so only one rule owns payload collection.
 - The `CLIENT_DATA` handler only acts on collections it initiated.
+- **Standalone f5-ja4 iRules:** if any of the standalone `JA4H`/`JA4T`/`JA4L` iRules
+  from f5devcentral are still attached to the virtual, they keep generating their own
+  fingerprints, log lines, and `X-JA4*` headers independently of this framework's
+  toggles. Detach them and enable the corresponding `atel_en(...)` item here instead
+  (only the `ja4.irule` has a supported coexistence path via `atel_ja4_mode external`).
 
 ## Trust XFF
 
@@ -104,6 +110,33 @@ configurable via `atel_xff_header`) the *effective* client IP after validation �
 GEO and IP-reputation lookups are re-run against it, and `ip_src` records whether the
 value came from `xff` or `tcp`. Only enable behind a trusted proxy/CDN tier that
 overwrites the header.
+
+## Device IDs: requirements & timing
+
+Device IDs are JavaScript-derived, so they need both configuration and a round trip:
+
+- **`device_awaf`** (`ASM::fingerprint`) — the ASM/AWAF policy must actually fingerprint
+  clients: enable *Session Tracking → Use Device ID* in the policy (Security ›
+  Application Security › Sessions and Logins). Without it the command returns nothing.
+- **`device_bot`** (`BOTDEFENSE::device_id`) — requires a Bot Defense profile attached
+  to the virtual with **Device ID mode** set to *Generate Before Access* or *Generate
+  After Access*. Without the profile, `BOTDEFENSE_ACTION` never fires at all.
+- **`device_xc`** — only populated when F5 Distributed Cloud fronts the virtual and is
+  configured to forward its bot/device header (`atel_xc_header`).
+- **First-request gap:** the ID is minted by injected JavaScript, so the *first* request
+  from a new client never carries one — it appears once the browser has executed the
+  challenge and re-sent. Both module events also fire **after** this iRule's
+  `HTTP_REQUEST` record is emitted, so in per-flow emission mode a newly seen device ID
+  triggers a one-time supplemental record with `event=device_id` carrying the full
+  telemetry set; in `atel_emit_per_request 1` mode the IDs simply appear in subsequent
+  request records. Downstream `X-ATel-*` headers carry device IDs from the next
+  keep-alive request onward.
+
+To verify quickly: set the item to debug (`atel_en(device_bot) 2` /
+`atel_en(device_awaf) 2`), browse the site for a few requests, and watch
+`/var/log/ltm` for the `ATEL(device_bot)` / `ATEL(device_awaf)` lines — they log on
+every `BOTDEFENSE_ACTION`/`ASM_REQUEST_DONE`, including the action/reason when no ID is
+present yet.
 
 ## Quick start
 
@@ -138,6 +171,6 @@ tmsh show sys table atel_events
 
 ## Roadmap
 
+- [x] JA4H (HTTP fingerprint) collector.
 - [ ] iApps LX visualization dashboard reading the `atel_events` subtable.
-- [ ] JA4H (HTTP fingerprint) collector.
 - [ ] Optional anomaly scoring proc (JA4↔geo↔identity consistency across a session).
